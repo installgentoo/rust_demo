@@ -1,7 +1,7 @@
 #![warn(clippy::all)]
 #![allow(clippy::range_plus_one, clippy::many_single_char_names, clippy::too_many_arguments, clippy::cast_lossless)]
 
-use grafix_toolbox::{gui::*, uses::math::*, uses::*, GL::mesh::*, GL::pbrt::*, GL::window::*, GL::*, *};
+use grafix_toolbox::{gui::*, uses::math::*, uses::Async::task::*, uses::*, GL::mesh::*, GL::pbrt::*, GL::window::*, GL::*, *};
 
 fn main() {
 	LOGGER!(logging::Term, INFO);
@@ -10,7 +10,7 @@ fn main() {
 	ShaderManager::LoadSources("shd_pbrt.glsl");
 
 	let mut window = TIMER!(window, {
-		let win = EXPECT!(Window::get((50, 50, 1600, 900), "Engine"));
+		let win = EXPECT!(Window::get((50, 50, 1700, 900), "Engine"));
 		GLEnable!(DEPTH_TEST, BLEND, MULTISAMPLE, TEXTURE_CUBE_MAP_SEAMLESS, DEPTH_WRITEMASK);
 		GLDisable!(CULL_FACE);
 		GL::BlendFunc::Set((gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA));
@@ -41,7 +41,7 @@ fn main() {
 	let atlas = TexAtlas::<RGBA>::new();
 	let mut spinner = Animation::from_file("spinner", &atlas);
 
-	let (skybox, brdf_lut) = (Environment::new_cached("lythwood_lounge_4k"), Environment::lut_cached());
+	let (skybox, brdf_lut) = (EnvTex::from(EXPECT!(Environment::new_cached("lythwood_lounge_4k"))), Environment::lut_cached());
 
 	let (mut skybox_shd, mut render_shd) = (
 		EXPECT!(Shader::new(("vs_skybox", "ps_skybox"))),
@@ -57,8 +57,6 @@ fn main() {
 			(gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_LINEAR)
 		),
 	);
-	let mut sphere = Mesh::make_sphere(0.1, 64);
-	let mut dragon = Mesh::new_cached("stanford_dragon");
 
 	let large_text: String = (0..100)
 		.map(|_| "Functional textbox is capable of showing millions of lines with negligeble cpu usage!(so long as we're not editing, but that can be solved functionally as well)\nBiggest issue is collecting the text to display, really - you can set large text range to 1000000 in release.\n\nUpper bar allows to drag layout around, pip on the bottom right resizes it.\n\n\n")
@@ -82,6 +80,9 @@ fn main() {
 
 	let mut exit = false;
 	let mut mouse_pos = (0., 0.);
+	let mut options: Vec<_> = ["stanford_dragon", "dr", "tyra", "not a model"].iter().map(|s| s.to_string()).collect();
+	let mut demo_mesh = DeferredMesh::default();
+	let mut loading_in_progress;
 	let mut magnification = 0.3;
 	let mut rotation = 0_f32;
 
@@ -96,16 +97,20 @@ fn main() {
 
 		{
 			window.draw_to_screen();
+			GL::ClearScreen((0., 1.));
+
 			let metallicity = 0.995 * r.Slider(ID!("metallicity"), (0.3, -0.88), (1., 0.05), 0.05);
 			let roughness = (0.05 + r.Slider(ID!("roughness"), (0.3, -0.94), (1., 0.05), 0.05)) / 1.05;
 			r.Label(ID!("metal_v"), (1.31, -0.88), (0.3, 0.05), &format!("Metal: {:.3}", metallicity));
 			r.Label(ID!("rough_v"), (1.31, -0.94), (0.3, 0.05), &format!("Rough: {:.3}", roughness));
+			let model_name = Selector::storage(ID!("model")).choice;
+			let model_name = options[model_name].clone();
+			r.Selector(ID!("model"), (1.31, -0.82), (0.6, 0.1), &mut options[..]);
 
 			let t = 1. - i;
 
 			use glm::{vec3 as v3, vec4 as v4, Mat4 as m4};
 			let m = magnification;
-			GL::ClearScreen((0., 1.));
 			let model = &glm::translate(
 				&glm::rotate(&glm::scale(&glm::identity(), &v3(m, m, m)), 90_f32.to_radians(), &v3(-1., 0., 0.)),
 				&v3(0., 0., -0.3),
@@ -146,8 +151,7 @@ fn main() {
 				("exposure", 1.),
 				("max_lod", skybox.mip_levels)
 			);
-			dragon.Draw();
-			sphere.Draw();
+			loading_in_progress = !demo_mesh.draw(&model_name);
 		}
 		{
 			let s = skybox.specular.Bind(mipmapped);
@@ -172,24 +176,22 @@ fn main() {
 			);
 
 			let (p, s) = button(4);
-			let pressed = r.Button(ID!("exit"), p, s, "Exit");
-			exit |= pressed;
-			show_tooltip(r.hovers_in((p, p.sum(s))) && !pressed, p.sum(s.mul(0.5)), "GUI is easy!", r);
+			exit = r.Button(ID!("exit"), p, s, "Exit");
+			show_tooltip(r.hovers_in((p, p.sum(s))) && !exit, p.sum(s.mul(0.5)), "GUI is easy!", r);
 		});
 
-		r.draw(primitives::Sprite {
-			pos: mouse_pos,
-			size: (40., 40.).div(Window::aspect()).div(Window::size()),
-			color: (1., 1. - i, 1., 1.),
-			tex: spinner.frame(i),
-		});
+		if loading_in_progress {
+			r.draw(primitives::Sprite {
+				pos: mouse_pos,
+				size: (40., 40.).div(Window::aspect()).div(Window::size()),
+				color: (1., 1. - i, 1., 1.),
+				tex: spinner.frame(i),
+			});
+		}
 
 		let mut events = window.poll_events();
-		events.iter().for_each(|e| {
-			if let MouseMove { at, .. } = e {
-				mouse_pos = *at;
-			}
-		});
+		events.iter().rev().find_map(|e| map_enum!(e, MouseMove { at, .. }, mouse_pos = *at));
+		r.sync_clipboard(&mut window);
 		renderer = r.unlock(&mut events);
 		window.swap();
 
@@ -219,5 +221,45 @@ fn timeout(active: bool) -> bool {
 			TIME = 0
 		}
 		TIME > 60
+	}
+}
+
+#[derive(Default)]
+struct DeferredMesh {
+	handle: Option<Task<(String, Res<Model>)>>,
+	mesh: Option<(String, Box<dyn AnyMesh>)>,
+}
+impl DeferredMesh {
+	fn draw(&mut self, name: &str) -> bool {
+		let Self { handle, mesh } = self;
+		if let Some((n, m)) = mesh {
+			m.Draw();
+			if n == name {
+				return true;
+			}
+		}
+
+		if handle.is_none() {
+			let name = name.to_string();
+			*mesh = Some(("".into(), Box::new(Mesh::make_sphere(0.1, 8))));
+			*handle = Some(task::spawn(async move { (name.clone(), Model::new_cached(&name)) }));
+		}
+
+		let handle = handle.as_mut().unwrap();
+		let mut ready = task::block_on(async move { task::poll_once(handle).await });
+
+		if ready.is_some() {
+			self.handle = None;
+			let (n, m) = ready.take().unwrap();
+			let m: Box<dyn AnyMesh> = m.map_or_else(
+				|e| {
+					WARN!("Failed to load '{}', {}", n, e);
+					Mesh::make_sphere(0.1, 8).to_trait()
+				},
+				|m| Mesh::from(m).to_trait(),
+			);
+			*mesh = Some((n, m));
+		}
+		false
 	}
 }

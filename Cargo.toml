@@ -21,4 +21,4 @@ name = "demo"
 path = "src/main.rs"
 
 [dependencies]
-grafix-toolbox = { version = "*", features = ["profiling"] }
+grafix-toolbox = { version = "0.7.2", features = ["profiling"] }
