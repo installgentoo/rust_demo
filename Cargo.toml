@@ -1,0 +1,18 @@
+[package]
+name = "rust_demo"
+version = "1.0.0"
+authors = ["Alexander Drozdoff"]
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+panic = 'abort'
+lto = true
+codegen-units = 1
+
+[[bin]]
+name = "demo"
+path = "src/demo.rs"
+
+[dependencies]
+grafix-toolbox = { version = "=0.8.33", features = ["profiling", "gui", "adv_cg", "adv_fs", "png"] }
