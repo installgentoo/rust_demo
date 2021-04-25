@@ -1,6 +1,6 @@
 [package]
 name = "rust_demo"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["Alexander Drozdoff"]
 edition = "2018"
 license = "MIT"
@@ -21,4 +21,4 @@ name = "demo"
 path = "src/main.rs"
 
 [dependencies]
-grafix-toolbox = { version = "0.7.2", features = ["profiling"] }
+grafix-toolbox = { version = "=0.8.0", features = ["profiling"] }

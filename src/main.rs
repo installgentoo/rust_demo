@@ -1,12 +1,13 @@
 #![warn(clippy::all)]
-#![allow(clippy::range_plus_one, clippy::many_single_char_names, clippy::too_many_arguments, clippy::cast_lossless)]
+#![allow(clippy::many_single_char_names)]
 
-use grafix_toolbox::{gui::*, uses::math::*, uses::Async::task::*, uses::*, GL::mesh::*, GL::pbrt::*, GL::window::*, GL::*, *};
+use grafix_toolbox::{gui::*, *};
+use uses::{asyn::*, math::*, *};
+use GL::{atlas::*, font::*, mesh::*, pbrt::*, window::*, *};
 
 fn main() {
 	LOGGER!(logging::Term, INFO);
 
-	ShaderManager::LoadSources("shd_support.glsl");
 	ShaderManager::LoadSources("shd_pbrt.glsl");
 
 	let mut window = TIMER!(window, {
@@ -15,13 +16,12 @@ fn main() {
 		GLDisable!(CULL_FACE);
 		GL::BlendFunc::Set((gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA));
 		GL::DepthFunc::Set(gl::LESS);
-		GL::EnableDebugContext(GL::DebugLevel::All);
 		win
 	});
 
 	let font = {
 		let alphabet = (9..=9).chain(32_u8..127).map(|n| n as char).collect::<String>() + "ёйцукенгшщзхъфывапролджэячсмитьбюЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ";
-		Font::new_cached("UbuntuMono-R", &alphabet)
+		Font::new_cached("UbuntuMono-R", alphabet)
 	};
 
 	let mut renderer = Renderer::new(Theme {
@@ -51,10 +51,10 @@ fn main() {
 	let (sampl, mipmapped) = (
 		&Sampler::linear(),
 		&Sampler!(
-			(gl::TEXTURE_WRAP_R, gl::CLAMP_TO_EDGE),
-			(gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE),
-			(gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE),
-			(gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_LINEAR)
+			(TEXTURE_WRAP_R, CLAMP_TO_EDGE),
+			(TEXTURE_WRAP_S, CLAMP_TO_EDGE),
+			(TEXTURE_WRAP_T, CLAMP_TO_EDGE),
+			(TEXTURE_MIN_FILTER, LINEAR_MIPMAP_LINEAR)
 		),
 	);
 
@@ -86,18 +86,19 @@ fn main() {
 	let mut magnification = 0.3;
 	let mut rotation = 0_f32;
 
-	for i in (0..100).chain((0..100).step_by(1).rev()).map(|i| f32::to(i) / 100.).cycle() {
-		let a = Window::aspect();
+	for i in (0..100).chain((0..100).step_by(1).rev()).map(|i| f32(i) / 100.).cycle() {
+		use glm::{vec3 as v3, vec4 as v4, Mat4 as m4};
+		let a = window.aspect();
 		let mut cam1 = Camera::new(
 			glm::perspective(a.y() / a.x(), 70_f32.to_radians(), 0.1, 10.),
-			glm::look_at(&glm::vec3(0., 0., -5.), &glm::vec3(0., 0., 0.), &glm::vec3(0., 1., 0.)),
+			glm::look_at(&v3(0., 0., -5.), &v3(0., 0., 0.), &v3(0., 1., 0.)),
 		);
 
 		let mut r = renderer.lock();
 
 		{
-			window.draw_to_screen();
-			GL::ClearScreen((0., 1.));
+			window.bind();
+			window.clear((0, 1));
 
 			let metallicity = 0.995 * r.Slider(ID!("metallicity"), (0.3, -0.88), (1., 0.05), 0.05);
 			let roughness = (0.05 + r.Slider(ID!("roughness"), (0.3, -0.94), (1., 0.05), 0.05)) / 1.05;
@@ -109,7 +110,6 @@ fn main() {
 
 			let t = 1. - i;
 
-			use glm::{vec3 as v3, vec4 as v4, Mat4 as m4};
 			let m = magnification;
 			let model = &glm::translate(
 				&glm::rotate(&glm::scale(&glm::identity(), &v3(m, m, m)), 90_f32.to_radians(), &v3(-1., 0., 0.)),
@@ -129,44 +129,39 @@ fn main() {
 				render_shd,
 				("irradiance_cubetex", &irr),
 				("specular_cubetex", &spec),
-				("brdf_lut", &lut),
+				("brdf_lut_tex", &lut),
 				("MVPMat", cam1.MVP(model)),
 				("ModelViewMat", cam1.MV(model)),
 				("NormalViewMat", cam1.NV(model)),
 				("NormalMat", cam1.N(model)),
-				("camera_world", Vec3::to(cam_world)),
+				("iCameraWorld", Vec3(cam_world)),
 				(
-					"light_pos",
+					"iLightPos",
 					&[
-						Vec4::to(view * v4(6. * c, 6. * s, 0., 1.)).xyz(),
-						Vec4::to(view * v4(2. * c, 0., 2. * s, 1.)).xyz(),
-						Vec4::to(view * v4(c, s, -2., 1.)).xyz(),
-						Vec4::to(view * v4(-1.5 * s, 1. * c, -2., 1.)).xyz()
+						Vec4(view * v4(6. * c, 6. * s, 0., 1.)).xyz(),
+						Vec4(view * v4(2. * c, 0., 2. * s, 1.)).xyz(),
+						Vec4(view * v4(c, s, -2., 1.)).xyz(),
+						Vec4(view * v4(-1.5 * s, 1. * c, -2., 1.)).xyz()
 					][..]
 				),
-				("light_color", &[(1., 0., 0., 2.), (0., 0., 1., 2.), (1., 0., 1., 2.), (0., 1., 0., 2.)][..]),
-				("albedo", hex_to_rgba(0xD4AF3700).xyz()),
-				("metallicity", metallicity),
-				("roughness", roughness),
-				("exposure", 1.),
-				("max_lod", skybox.mip_levels)
+				("iLightColor", &[(1., 0., 0., 2.), (0., 0., 1., 2.), (1., 0., 1., 2.), (0., 1., 0., 2.)][..]),
+				("iAlbedo", hex_to_rgba(0xD4AF3700).xyz()),
+				("iMetallicity", metallicity),
+				("iRoughness", roughness),
+				("iExposure", 1.),
+				("iMaxLod", skybox.mip_levels)
 			);
 			loading_in_progress = !demo_mesh.draw(&model_name);
 		}
 		{
 			let s = skybox.specular.Bind(mipmapped);
-			let _ = Uniforms!(skybox_shd, ("skybox_tex", &s), ("MVPMat", cam1.VP()), ("exposure", 1.));
+			let _ = Uniforms!(skybox_shd, ("skybox_tex", &s), ("MVPMat", cam1.VP()), ("iExposure", 1.));
 			Skybox::Draw();
 		}
 
 		r.Layout(ID!("menu"), |r, (pos, size)| {
 			let (button_w, button_h, padding) = (0.18, 0.06, 0.01);
-			let button = |n| {
-				(
-					pos.sum(size.mul((button_w * f32::to(n) + padding * f32::to(n * 2 + 1), padding))),
-					size.mul((button_w, button_h)),
-				)
-			};
+			let button = |n| (pos.sum(size.mul((button_w * f32(n) + padding * f32(n * 2 + 1), padding))), size.mul((button_w, button_h)));
 
 			r.TextEdit(
 				ID!("text"),
@@ -183,16 +178,16 @@ fn main() {
 		if loading_in_progress {
 			r.draw(primitives::Sprite {
 				pos: mouse_pos,
-				size: (40., 40.).div(Window::aspect()).div(Window::size()),
+				size: (40., 40.).div(window.aspect()).div(window.size()),
 				color: (1., 1. - i, 1., 1.),
 				tex: spinner.frame(i),
 			});
 		}
 
 		let mut events = window.poll_events();
-		events.iter().rev().find_map(|e| map_enum!(e, MouseMove { at, .. }, mouse_pos = *at));
+		events.iter().rev().find_map(|e| map_enum!(MouseMove { at, .. } = e => mouse_pos = *at));
 		r.sync_clipboard(&mut window);
-		renderer = r.unlock(&mut events);
+		renderer = r.unlock(&mut window, &mut events);
 		window.swap();
 
 		for e in events {
